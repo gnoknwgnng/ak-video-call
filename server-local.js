@@ -3,37 +3,25 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 
+// Create express app
 const app = express();
 const server = http.createServer(app);
 
-// Configure Socket.IO for Vercel
+// Configure Socket.IO
 const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
   },
-  // Vercel specific configuration
   transports: ["websocket", "polling"],
-  allowEIO3: true,
-  // Additional Vercel configuration
-  path: "/socket.io"
+  allowEIO3: true
 });
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API routes
-app.get('/api/*', (req, res) => {
-  res.status(404).send('API route not found');
-});
-
 // Serve the main page
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Fallback for client-side routing
-app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -42,47 +30,7 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    // Additional debugging info
-    connections: connections.size,
-    queues: {
-      male: maleQueue.length,
-      female: femaleQueue.length,
-      other: otherQueue.length
-    }
-  });
-});
-
-// Simple test endpoint
-app.get('/test', (req, res) => {
-  res.send('Server is working correctly!');
-});
-
-// Debug endpoint
-app.get('/debug', (req, res) => {
-  res.json({
-    message: 'Debug information',
-    connections: Array.from(connections.entries()),
-    queues: {
-      male: maleQueue,
-      female: femaleQueue,
-      other: otherQueue
-    }
-  });
-});
-
-// Monitoring endpoint
-app.get('/status', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    queues: {
-      male: maleQueue.length,
-      female: femaleQueue.length,
-      other: otherQueue.length
-    },
-    activeConnections: connections.size
+    uptime: process.uptime()
   });
 });
 
@@ -96,7 +44,6 @@ let connections = new Map();
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-  console.log('Socket.IO connection established');
 
   // When a user joins, add them to the appropriate queue
   socket.on('join', (data) => {
@@ -263,17 +210,8 @@ function disconnectUser(socketId) {
   connections.delete(socketId);
 }
 
-// For Vercel deployment
-if (require.main === module) {
-  const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-} 
-
-// Export for Vercel serverless functions
-module.exports = (req, res) => {
-  res.status(200).send('Socket.IO server is running');
-};
-
-// Export the server for Vercel
+// Start server when run directly
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
