@@ -236,12 +236,12 @@ if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
-} else {
-  // Export for Vercel serverless functions
-  module.exports = (req, res) => {
-    res.status(200).send('Socket.IO server is running');
-  };
-}
+} 
+
+// Export for Vercel serverless functions
+module.exports = (req, res) => {
+  res.status(200).send('Socket.IO server is running');
+};
 
 // Export the server for Vercel
 module.exports.server = server;
