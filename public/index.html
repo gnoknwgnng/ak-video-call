@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omegle Gender Match</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Landing Page -->
+        <div id="landing-page" class="page active">
+            <h1>Omegle Gender Match</h1>
+            <p>Select your gender to start:</p>
+            <div class="gender-selection">
+                <button id="male-btn" class="gender-btn">Male</button>
+                <button id="female-btn" class="gender-btn">Female</button>
+                <button id="other-btn" class="gender-btn">Other</button>
+            </div>
+        </div>
+
+        <!-- Waiting Page -->
+        <div id="waiting-page" class="page">
+            <h2>Looking for a match...</h2>
+            <div class="spinner"></div>
+            <p id="waiting-message">Searching for someone of the opposite gender</p>
+            <button id="cancel-btn" class="btn">Cancel</button>
+        </div>
+
+        <!-- Call Page -->
+        <div id="call-page" class="page">
+            <div class="video-container">
+                <video id="local-video" autoplay muted></video>
+                <video id="remote-video" autoplay></video>
+            </div>
+            
+            <div class="call-controls">
+                <div class="timer" id="timer">00:00</div>
+                <div class="control-buttons">
+                    <button id="sound-toggle" class="btn btn-secondary">🔊 Sound On</button>
+                    <button id="disconnect-btn" class="btn btn-danger">Disconnect</button>
+                </div>
+            </div>
+            
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input">
+                    <input type="text" id="message-input" placeholder="Type a message...">
+                    <button id="send-btn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    <script src="sounds.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
