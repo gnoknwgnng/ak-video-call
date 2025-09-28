@@ -11,22 +11,27 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  // Vercel specific configuration
+  transports: ["websocket", "polling"],
+  allowEIO3: true
 });
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Vercel requires this for serverless functions
-app.use((req, res, next) => {
-  if (req.path === '/server.js') {
-    return res.status(200).send('Socket.IO server endpoint');
-  }
-  next();
+// API routes
+app.get('/api/*', (req, res) => {
+  res.status(404).send('API route not found');
 });
 
 // Serve the main page
 app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Fallback for client-side routing
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 

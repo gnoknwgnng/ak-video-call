@@ -42,7 +42,8 @@ function initSocket() {
         withCredentials: false,
         reconnection: true,
         reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        reconnectionDelay: 1000,
+        timeout: 10000
     });
     
     socket.on('connect', () => {
@@ -51,6 +52,10 @@ function initSocket() {
     
     socket.on('connect_error', (error) => {
         console.log('Connection error:', error);
+        // Show user-friendly error message
+        if (waitingPage.classList.contains('active')) {
+            waitingMessage.textContent = 'Connection error. Please refresh the page.';
+        }
     });
     
     socket.on('disconnect', (reason) => {

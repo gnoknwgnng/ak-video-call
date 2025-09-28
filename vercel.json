@@ -9,22 +9,23 @@
   "routes": [
     {
       "src": "/socket.io/(.*)",
-      "dest": "/server.js",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
-      }
+      "dest": "server.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "server.js"
     },
     {
       "src": "/health",
-      "dest": "/server.js"
+      "dest": "server.js"
+    },
+    {
+      "src": "/status",
+      "dest": "server.js"
     },
     {
       "src": "/(.*)",
-      "dest": "/public/$1"
+      "dest": "server.js"
     }
-  ],
-  "regions": ["iad1"]
+  ]
 }
