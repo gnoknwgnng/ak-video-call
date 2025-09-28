@@ -45,6 +45,11 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Simple test endpoint
+app.get('/test', (req, res) => {
+  res.send('Server is working correctly!');
+});
+
 // Monitoring endpoint
 app.get('/status', (req, res) => {
   res.status(200).json({
