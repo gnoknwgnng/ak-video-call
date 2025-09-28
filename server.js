@@ -14,7 +14,9 @@ const io = socketIo(server, {
   },
   // Vercel specific configuration
   transports: ["websocket", "polling"],
-  allowEIO3: true
+  allowEIO3: true,
+  // Additional Vercel configuration
+  path: "/socket.io"
 });
 
 // Serve static files from the public directory
@@ -41,13 +43,33 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    memory: process.memoryUsage()
+    memory: process.memoryUsage(),
+    // Additional debugging info
+    connections: connections.size,
+    queues: {
+      male: maleQueue.length,
+      female: femaleQueue.length,
+      other: otherQueue.length
+    }
   });
 });
 
 // Simple test endpoint
 app.get('/test', (req, res) => {
   res.send('Server is working correctly!');
+});
+
+// Debug endpoint
+app.get('/debug', (req, res) => {
+  res.json({
+    message: 'Debug information',
+    connections: Array.from(connections.entries()),
+    queues: {
+      male: maleQueue,
+      female: femaleQueue,
+      other: otherQueue
+    }
+  });
 });
 
 // Monitoring endpoint
@@ -74,6 +96,7 @@ let connections = new Map();
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
+  console.log('Socket.IO connection established');
 
   // When a user joins, add them to the appropriate queue
   socket.on('join', (data) => {

@@ -24,8 +24,13 @@
       "dest": "server.js"
     },
     {
+      "src": "/debug",
+      "dest": "server.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "server.js"
     }
-  ]
+  ],
+  "regions": ["iad1"]
 }
