@@ -112,7 +112,7 @@ async function initSocket(server) {
       },
       transports: ["websocket", "polling"],
       allowEIO3: true,
-      path: "/socket.io"
+      path: "/socket.io/"
     });
     
     console.log('Socket.IO server created successfully');
