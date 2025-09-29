@@ -7,9 +7,13 @@ let supabase;
 
 // Initialize Supabase client
 function initSupabase() {
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
-    // Production - use Supabase
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  // Use your specific Supabase credentials
+  const supabaseUrl = 'https://ptqjnuquemfelgutgilp.supabase.co';
+  const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
+  
+  if (supabaseUrl && supabaseAnonKey) {
+    // Production - use Supabase with your credentials
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
   } else {
     // Development - use in-memory storage
     supabase = {
