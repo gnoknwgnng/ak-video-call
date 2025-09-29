@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const socketIo = require('socket.io');
 const { initSocket } = require('./socket');
 
 // Create a single app instance and server

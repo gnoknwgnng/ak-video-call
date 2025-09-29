@@ -8,7 +8,6 @@ let supabase;
 // Initialize Supabase client
 function initSupabase() {
   try {
-    // Use environment variables in production, fallback to hardcoded values for testing
     const supabaseUrl = process.env.SUPABASE_URL || 'https://ptqjnuquemfelgutgilp.supabase.co';
     const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
     

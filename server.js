@@ -16,7 +16,7 @@ const io = socketIo(server, {
   transports: ["websocket", "polling"],
   allowEIO3: true,
   // Additional Vercel configuration
-  path: "/socket.io"
+  path: "/socket.io/"
 });
 
 // Serve static files from the public directory
