@@ -4,51 +4,6 @@ const socketIo = require('socket.io');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
-// Supabase configuration
-const supabaseUrl = 'https://ptqjnuquemfelgutgilp.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
-let supabase;
-
-// Initialize Supabase client or fallback to in-memory storage
-try {
-  supabase = createClient(supabaseUrl, supabaseAnonKey);
-  console.log('Supabase client initialized');
-} catch (error) {
-  console.log('Failed to initialize Supabase, using in-memory storage');
-  supabase = memoryStorage;
-}
-
-// Create express app
-const app = express();
-const server = http.createServer(app);
-
-// Configure Socket.IO
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
-  transports: ["websocket", "polling"],
-  allowEIO3: true
-});
-
-// Serve static files from the public directory
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Serve the main page
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
 // In-memory storage for local development (when Supabase is not available)
 const memoryStorage = {
   from: (table) => ({
@@ -109,6 +64,51 @@ const memoryStorage = {
     })
   })
 };
+
+// Supabase configuration
+const supabaseUrl = 'https://ptqjnuquemfelgutgilp.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
+let supabase;
+
+// Initialize Supabase client or fallback to in-memory storage
+try {
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+  console.log('Supabase client initialized');
+} catch (error) {
+  console.log('Failed to initialize Supabase, using in-memory storage');
+  supabase = memoryStorage;
+}
+
+// Create express app
+const app = express();
+const server = http.createServer(app);
+
+// Configure Socket.IO
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  transports: ["websocket", "polling"],
+  allowEIO3: true
+});
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve the main page
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 
 io.on('connection', async (socket) => {
   console.log('User connected:', socket.id);

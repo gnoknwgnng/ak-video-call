@@ -9,23 +9,28 @@
   "routes": [
     {
       "src": "/socket.io/(.*)",
-      "dest": "api/index.js"
+      "dest": "/api/index.js",
+      "methods": ["GET", "POST"],
+      "headers": {
+        "Connection": "Upgrade",
+        "Upgrade": "websocket"
+      }
     },
     {
       "src": "/api/(.*)",
-      "dest": "api/index.js"
+      "dest": "/api/index.js"
     },
     {
       "src": "/health",
-      "dest": "api/index.js"
+      "dest": "/api/index.js"
     },
     {
       "src": "/debug",
-      "dest": "api/index.js"
+      "dest": "/api/index.js"
     },
     {
       "src": "/(.*)",
-      "dest": "api/index.js"
+      "dest": "/api/index.js"
     }
   ]
 }

@@ -3,19 +3,26 @@ const http = require('http');
 const path = require('path');
 const { initSocket } = require('./socket');
 
-// Create express app
+// Create a single app instance and server
 const app = express();
-
-// Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO once
 let io;
-initSocket(server).then(initializedIo => {
-  io = initializedIo;
-}).catch(err => {
-  console.error('Failed to initialize Socket.IO:', err);
-});
+let socketInitialized = false;
+
+async function initializeSocket() {
+  if (!socketInitialized) {
+    try {
+      io = await initSocket(server);
+      socketInitialized = true;
+      console.log('Socket.IO initialized');
+    } catch (err) {
+      console.error('Failed to initialize Socket.IO:', err);
+    }
+  }
+  return io;
+}
 
 // Middleware
 app.use(express.json());
@@ -39,13 +46,15 @@ app.get('/health', (req, res) => {
 app.get('/debug', (req, res) => {
   res.json({
     message: 'Debug information',
-    // Note: In a real serverless environment, these would be empty
-    // because each function invocation has its own memory space
+    socketInitialized: socketInitialized
   });
 });
 
 // Export the server for Vercel
-module.exports = (req, res) => {
+module.exports = async (req, res) => {
+  // Initialize Socket.IO if not already done
+  await initializeSocket();
+  
   return new Promise((resolve, reject) => {
     // Handle the request
     server.emit('request', req, res);

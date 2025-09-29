@@ -7,9 +7,9 @@ let supabase;
 
 // Initialize Supabase client
 function initSupabase() {
-  // Use your specific Supabase credentials
-  const supabaseUrl = 'https://ptqjnuquemfelgutgilp.supabase.co';
-  const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
+  // Use environment variables in production, fallback to hardcoded values for testing
+  const supabaseUrl = process.env.SUPABASE_URL || 'https://ptqjnuquemfelgutgilp.supabase.co';
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0cWpudXF1ZW1mZWxndXRnaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNTYxNTgsImV4cCI6MjA3NDczMjE1OH0.nUbAY5kWglAHVxio7uEB_ZzktCaz5tZ93vZic3G2XEU';
   
   if (supabaseUrl && supabaseAnonKey) {
     // Production - use Supabase with your credentials
@@ -85,16 +85,6 @@ const supabaseClient = initSupabase();
 
 // Function to handle Socket.IO connections
 async function initSocket(server) {
-  // Connect to Redis if needed
-  if (redisClient && !redisClient.connected) {
-    try {
-      await redisClient.connect();
-      console.log('Connected to Redis');
-    } catch (err) {
-      console.error('Failed to connect to Redis:', err);
-    }
-  }
-  
   const io = socketIo(server, {
     cors: {
       origin: "*",
@@ -112,21 +102,41 @@ async function initSocket(server) {
       const { gender } = data;
       console.log(`${socket.id} joined as ${gender}`);
       
-      // Add user to the queue table in Supabase
-      const { error: queueError } = await supabaseClient
-        .from('queues')
-        .insert([{ socket_id: socket.id, gender, created_at: new Date() }]);
-      
-      // Store user data
-      const { error: userError } = await supabaseClient
-        .from('users')
-        .insert([{ socket_id: socket.id, gender, partner_id: null, created_at: new Date() }]);
-      
-      if (queueError) console.error('Error adding to queue:', queueError);
-      if (userError) console.error('Error adding user:', userError);
-      
-      // Try to find a match
-      await findMatch(io);
+      try {
+        // Add user to the queue table in Supabase
+        const { data: queueData, error: queueError } = await supabaseClient
+          .from('queues')
+          .insert([{ socket_id: socket.id, gender, created_at: new Date() }]);
+        
+        if (queueError) {
+          console.error('Error adding to queue:', queueError);
+          // Send error to client
+          socket.emit('error', { message: 'Failed to join queue' });
+          return;
+        }
+        
+        console.log('Successfully added to queue:', queueData);
+        
+        // Store user data
+        const { data: userData, error: userError } = await supabaseClient
+          .from('users')
+          .insert([{ socket_id: socket.id, gender, partner_id: null, created_at: new Date() }]);
+        
+        if (userError) {
+          console.error('Error adding user:', userError);
+          // Send error to client
+          socket.emit('error', { message: 'Failed to register user' });
+          return;
+        }
+        
+        console.log('Successfully registered user:', userData);
+        
+        // Try to find a match
+        await findMatch(io);
+      } catch (err) {
+        console.error('Unexpected error in join handler:', err);
+        socket.emit('error', { message: 'Unexpected error occurred' });
+      }
     });
 
     // Handle WebRTC signaling
@@ -401,4 +411,4 @@ async function initSocket(server) {
   return io;
 }
 
-module.exports = { initSocket, connections, maleQueue, femaleQueue, otherQueue };
+module.exports = { initSocket };
