@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Connection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .log {
+            background-color: #000;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .error {
+            color: #ff4444;
+        }
+        .success {
+            color: #44ff44;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Connection Debug Tool</h1>
+        
+        <div>
+            <button onclick="testHealth()">Test Health</button>
+            <button onclick="testDebug()">Test Debug</button>
+            <button onclick="testSupabase()">Test Supabase</button>
+            <button onclick="testSocket()">Test Socket Connection</button>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div id="log" class="log"></div>
+        
+        <div>
+            <h3>Connection Status:</h3>
+            <p>Socket.IO Status: <span id="socketStatus">Unknown</span></p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const logElement = document.getElementById('log');
+        let socket;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const entry = document.createElement('div');
+            entry.textContent = `[${timestamp}] ${message}`;
+            entry.className = type;
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function clearLog() {
+            logElement.innerHTML = '';
+        }
+
+        async function testHealth() {
+            log('Testing health endpoint...');
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                log(`Health check: ${response.status} - ${JSON.stringify(data)}`, 'success');
+            } catch (error) {
+                log(`Health check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testDebug() {
+            log('Testing debug endpoint...');
+            try {
+                const response = await fetch('/api/debug');
+                const data = await response.json();
+                log(`Debug info: ${response.status} - ${JSON.stringify(data)}`, 'success');
+            } catch (error) {
+                log(`Debug test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testSupabase() {
+            log('Testing Supabase connection...');
+            try {
+                const response = await fetch('/api/test-supabase');
+                const data = await response.json();
+                if (data.success) {
+                    log(`Supabase test: SUCCESS - ${JSON.stringify(data)}`, 'success');
+                } else {
+                    log(`Supabase test: FAILED - ${JSON.stringify(data)}`, 'error');
+                }
+            } catch (error) {
+                log(`Supabase test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function testSocket() {
+            log('Testing Socket.IO connection...');
+            
+            // Close existing socket if any
+            if (socket) {
+                socket.disconnect();
+            }
+            
+            // Connect to Socket.IO
+            socket = io();
+            
+            socket.on('connect', () => {
+                log('Socket.IO connected successfully!', 'success');
+                document.getElementById('socketStatus').textContent = 'Connected';
+                document.getElementById('socketStatus').className = 'success';
+            });
+            
+            socket.on('disconnect', () => {
+                log('Socket.IO disconnected', 'error');
+                document.getElementById('socketStatus').textContent = 'Disconnected';
+                document.getElementById('socketStatus').className = 'error';
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`Socket.IO connection error: ${error.message}`, 'error');
+                document.getElementById('socketStatus').textContent = 'Connection Error';
+                document.getElementById('socketStatus').className = 'error';
+            });
+            
+            socket.on('error', (error) => {
+                log(`Socket.IO error: ${JSON.stringify(error)}`, 'error');
+            });
+        }
+
+        // Initialize
+        log('Debug tool initialized. Click buttons to test connections.');
+    </script>
+</body>
+</html>
