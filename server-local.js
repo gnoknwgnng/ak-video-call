@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
-const redis = require('redis');
+const { createClient } = require('@supabase/supabase-js');
 
 // Create express app
 const app = express();
@@ -35,46 +35,65 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Redis client for local development
-const redisClient = {
-  connected: true,
-  async lpush(key, value) {
-    if (!this.data) this.data = {};
-    if (!this.data[key]) this.data[key] = [];
-    this.data[key].unshift(value);
-    return this.data[key].length;
-  },
-  async rpop(key) {
-    if (!this.data) this.data = {};
-    if (!this.data[key] || this.data[key].length === 0) return null;
-    return this.data[key].pop();
-  },
-  async hset(key, field, value) {
-    if (!this.data) this.data = {};
-    if (!this.data[key]) this.data[key] = {};
-    this.data[key][field] = value;
-    return 1;
-  },
-  async hget(key, field) {
-    if (!this.data || !this.data[key]) return null;
-    return this.data[key][field];
-  },
-  async hdel(key, field) {
-    if (!this.data || !this.data[key]) return 0;
-    if (this.data[key][field] !== undefined) {
-      delete this.data[key][field];
-      return 1;
-    }
-    return 0;
-  },
-  async del(key) {
-    if (!this.data) return 0;
-    if (this.data[key] !== undefined) {
-      delete this.data[key];
-      return 1;
-    }
-    return 0;
-  }
+// Supabase client for local development
+const supabase = {
+  from: (table) => ({
+    insert: async (data) => {
+      if (!this.data) this.data = {};
+      if (!this.data[table]) this.data[table] = [];
+      this.data[table].push(data);
+      return { data: data, error: null };
+    },
+    select: async (fields) => {
+      return {
+        data: this.data && this.data[table] ? this.data[table] : [],
+        error: null
+      };
+    },
+    update: async (data) => {
+      return {
+        data: data,
+        error: null
+      };
+    },
+    delete: async () => {
+      if (this.data && this.data[table]) {
+        this.data[table] = [];
+      }
+      return { data: null, error: null };
+    },
+    eq: (field, value) => ({
+      single: async () => {
+        if (!this.data || !this.data[table]) return { data: null, error: null };
+        const item = this.data[table].find(item => item[field] === value);
+        return { data: item || null, error: null };
+      },
+      update: async (data) => {
+        if (this.data && this.data[table]) {
+          this.data[table] = this.data[table].map(item => 
+            item[field] === value ? { ...item, ...data } : item
+          );
+        }
+        return { data: data, error: null };
+      },
+      delete: async () => {
+        if (this.data && this.data[table]) {
+          this.data[table] = this.data[table].filter(item => item[field] !== value);
+        }
+        return { data: null, error: null };
+      }
+    }),
+    order: (field, options) => ({
+      limit: async (count) => {
+        if (!this.data || !this.data[table]) return { data: [], error: null };
+        let result = [...this.data[table]];
+        if (options.ascending === false) {
+          result.sort((a, b) => b[field] - a[field]);
+        }
+        return { data: result.slice(0, count), error: null };
+      }
+    })
+  })
 };
 
 io.on('connection', async (socket) => {
@@ -85,14 +104,18 @@ io.on('connection', async (socket) => {
     const { gender } = data;
     console.log(`${socket.id} joined as ${gender}`);
     
-    // Add user to the appropriate queue in Redis
-    const queueKey = `queue:${gender}`;
-    await redisClient.lpush(queueKey, socket.id);
+    // Add user to the queue table in Supabase
+    const { error: queueError } = await supabase
+      .from('queues')
+      .insert([{ socket_id: socket.id, gender, created_at: new Date() }]);
     
     // Store user data
-    const userKey = `user:${socket.id}`;
-    await redisClient.hset(userKey, 'gender', gender);
-    await redisClient.hset(userKey, 'partner', 'null');
+    const { error: userError } = await supabase
+      .from('users')
+      .insert([{ socket_id: socket.id, gender, partner_id: null, created_at: new Date() }]);
+    
+    if (queueError) console.error('Error adding to queue:', queueError);
+    if (userError) console.error('Error adding user:', userError);
     
     // Try to find a match
     await findMatch();
@@ -100,35 +123,51 @@ io.on('connection', async (socket) => {
 
   // Handle WebRTC signaling
   socket.on('offer', async (data) => {
-    const userKey = `user:${socket.id}`;
-    const partnerId = await redisClient.hget(userKey, 'partner');
-    if (partnerId && partnerId !== 'null') {
-      io.to(partnerId).emit('offer', data);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('partner_id')
+      .eq('socket_id', socket.id)
+      .single();
+    
+    if (!error && user && user.partner_id) {
+      io.to(user.partner_id).emit('offer', data);
     }
   });
 
   socket.on('answer', async (data) => {
-    const userKey = `user:${socket.id}`;
-    const partnerId = await redisClient.hget(userKey, 'partner');
-    if (partnerId && partnerId !== 'null') {
-      io.to(partnerId).emit('answer', data);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('partner_id')
+      .eq('socket_id', socket.id)
+      .single();
+    
+    if (!error && user && user.partner_id) {
+      io.to(user.partner_id).emit('answer', data);
     }
   });
 
   socket.on('ice-candidate', async (data) => {
-    const userKey = `user:${socket.id}`;
-    const partnerId = await redisClient.hget(userKey, 'partner');
-    if (partnerId && partnerId !== 'null') {
-      io.to(partnerId).emit('ice-candidate', data);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('partner_id')
+      .eq('socket_id', socket.id)
+      .single();
+    
+    if (!error && user && user.partner_id) {
+      io.to(user.partner_id).emit('ice-candidate', data);
     }
   });
 
   // Handle chat messages
   socket.on('chat-message', async (data) => {
-    const userKey = `user:${socket.id}`;
-    const partnerId = await redisClient.hget(userKey, 'partner');
-    if (partnerId && partnerId !== 'null') {
-      io.to(partnerId).emit('chat-message', data);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('partner_id')
+      .eq('socket_id', socket.id)
+      .single();
+    
+    if (!error && user && user.partner_id) {
+      io.to(user.partner_id).emit('chat-message', data);
     }
   });
 
@@ -142,11 +181,18 @@ io.on('connection', async (socket) => {
   socket.on('disconnect-call', async () => {
     await disconnectUser(socket.id);
     // Re-add user to queue
-    const userKey = `user:${socket.id}`;
-    const gender = await redisClient.hget(userKey, 'gender');
-    if (gender) {
-      const queueKey = `queue:${gender}`;
-      await redisClient.lpush(queueKey, socket.id);
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('gender')
+      .eq('socket_id', socket.id)
+      .single();
+    
+    if (!error && user) {
+      const { error: queueError } = await supabase
+        .from('queues')
+        .insert([{ socket_id: socket.id, gender: user.gender, created_at: new Date() }]);
+      
+      if (queueError) console.error('Error re-adding to queue:', queueError);
       await findMatch();
     }
   });
@@ -154,99 +200,194 @@ io.on('connection', async (socket) => {
 
 // Function to match users
 async function findMatch() {
-  // Try to match male with female
-  const maleId = await redisClient.rpop('queue:male');
-  const femaleId = await redisClient.rpop('queue:female');
+  // Get all users in queues
+  const { data: queues, error: queueError } = await supabase
+    .from('queues')
+    .select('*')
+    .order('created_at', { ascending: true });
   
-  if (maleId && femaleId) {
-    // Set partners
-    await redisClient.hset(`user:${maleId}`, 'partner', femaleId);
-    await redisClient.hset(`user:${femaleId}`, 'partner', maleId);
-    
-    // Notify both users
-    io.to(maleId).emit('matched', { partnerGender: 'female' });
-    io.to(femaleId).emit('matched', { partnerGender: 'male' });
-    
-    console.log(`Matched ${maleId} with ${femaleId}`);
+  if (queueError) {
+    console.error('Error fetching queues:', queueError);
     return;
   }
   
-  // Put back unmatched users
-  if (maleId) await redisClient.lpush('queue:male', maleId);
-  if (femaleId) await redisClient.lpush('queue:female', femaleId);
+  // Group users by gender
+  const maleQueue = queues.filter(q => q.gender === 'male');
+  const femaleQueue = queues.filter(q => q.gender === 'female');
+  const otherQueue = queues.filter(q => q.gender === 'other');
+  
+  // Try to match male with female
+  if (maleQueue.length > 0 && femaleQueue.length > 0) {
+    const maleUser = maleQueue[0];
+    const femaleUser = femaleQueue[0];
+    
+    // Set partners
+    await supabase
+      .from('users')
+      .update({ partner_id: femaleUser.socket_id })
+      .eq('socket_id', maleUser.socket_id);
+    
+    await supabase
+      .from('users')
+      .update({ partner_id: maleUser.socket_id })
+      .eq('socket_id', femaleUser.socket_id);
+    
+    // Remove from queues
+    await supabase
+      .from('queues')
+      .delete()
+      .eq('socket_id', maleUser.socket_id);
+    
+    await supabase
+      .from('queues')
+      .delete()
+      .eq('socket_id', femaleUser.socket_id);
+    
+    // Notify both users
+    io.to(maleUser.socket_id).emit('matched', { partnerGender: 'female' });
+    io.to(femaleUser.socket_id).emit('matched', { partnerGender: 'male' });
+    
+    console.log(`Matched ${maleUser.socket_id} with ${femaleUser.socket_id}`);
+    return;
+  }
   
   // Try to match others with anyone
-  const otherId = await redisClient.rpop('queue:other');
-  if (otherId) {
-    const maleId = await redisClient.rpop('queue:male');
-    if (maleId) {
-      await redisClient.hset(`user:${otherId}`, 'partner', maleId);
-      await redisClient.hset(`user:${maleId}`, 'partner', otherId);
+  if (otherQueue.length > 0) {
+    const otherUser = otherQueue[0];
+    
+    if (maleQueue.length > 0) {
+      const maleUser = maleQueue[0];
       
-      io.to(otherId).emit('matched', { partnerGender: 'male' });
-      io.to(maleId).emit('matched', { partnerGender: 'other' });
+      // Set partners
+      await supabase
+        .from('users')
+        .update({ partner_id: maleUser.socket_id })
+        .eq('socket_id', otherUser.socket_id);
       
-      console.log(`Matched ${otherId} with ${maleId}`);
+      await supabase
+        .from('users')
+        .update({ partner_id: otherUser.socket_id })
+        .eq('socket_id', maleUser.socket_id);
+      
+      // Remove from queues
+      await supabase
+        .from('queues')
+        .delete()
+        .eq('socket_id', otherUser.socket_id);
+      
+      await supabase
+        .from('queues')
+        .delete()
+        .eq('socket_id', maleUser.socket_id);
+      
+      // Notify both users
+      io.to(otherUser.socket_id).emit('matched', { partnerGender: 'male' });
+      io.to(maleUser.socket_id).emit('matched', { partnerGender: 'other' });
+      
+      console.log(`Matched ${otherUser.socket_id} with ${maleUser.socket_id}`);
       return;
     }
     
-    const femaleId = await redisClient.rpop('queue:female');
-    if (femaleId) {
-      await redisClient.hset(`user:${otherId}`, 'partner', femaleId);
-      await redisClient.hset(`user:${femaleId}`, 'partner', otherId);
+    if (femaleQueue.length > 0) {
+      const femaleUser = femaleQueue[0];
       
-      io.to(otherId).emit('matched', { partnerGender: 'female' });
-      io.to(femaleId).emit('matched', { partnerGender: 'other' });
+      // Set partners
+      await supabase
+        .from('users')
+        .update({ partner_id: femaleUser.socket_id })
+        .eq('socket_id', otherUser.socket_id);
       
-      console.log(`Matched ${otherId} with ${femaleId}`);
+      await supabase
+        .from('users')
+        .update({ partner_id: otherUser.socket_id })
+        .eq('socket_id', femaleUser.socket_id);
+      
+      // Remove from queues
+      await supabase
+        .from('queues')
+        .delete()
+        .eq('socket_id', otherUser.socket_id);
+      
+      await supabase
+        .from('queues')
+        .delete()
+        .eq('socket_id', femaleUser.socket_id);
+      
+      // Notify both users
+      io.to(otherUser.socket_id).emit('matched', { partnerGender: 'female' });
+      io.to(femaleUser.socket_id).emit('matched', { partnerGender: 'other' });
+      
+      console.log(`Matched ${otherUser.socket_id} with ${femaleUser.socket_id}`);
       return;
     }
-    
-    // Put back unmatched other user
-    await redisClient.lpush('queue:other', otherId);
   }
   
   // Try to match others with other if no opposite gender available
-  const firstOtherId = await redisClient.rpop('queue:other');
-  const secondOtherId = await redisClient.rpop('queue:other');
-  
-  if (firstOtherId && secondOtherId) {
-    await redisClient.hset(`user:${firstOtherId}`, 'partner', secondOtherId);
-    await redisClient.hset(`user:${secondOtherId}`, 'partner', firstOtherId);
+  if (otherQueue.length > 1) {
+    const firstOtherUser = otherQueue[0];
+    const secondOtherUser = otherQueue[1];
     
-    io.to(firstOtherId).emit('matched', { partnerGender: 'other' });
-    io.to(secondOtherId).emit('matched', { partnerGender: 'other' });
+    // Set partners
+    await supabase
+      .from('users')
+      .update({ partner_id: secondOtherUser.socket_id })
+      .eq('socket_id', firstOtherUser.socket_id);
     
-    console.log(`Matched ${firstOtherId} with ${secondOtherId}`);
-  } else {
-    // Put back unmatched other users
-    if (firstOtherId) await redisClient.lpush('queue:other', firstOtherId);
-    if (secondOtherId) await redisClient.lpush('queue:other', secondOtherId);
+    await supabase
+      .from('users')
+      .update({ partner_id: firstOtherUser.socket_id })
+      .eq('socket_id', secondOtherUser.socket_id);
+    
+    // Remove from queues
+    await supabase
+      .from('queues')
+      .delete()
+      .eq('socket_id', firstOtherUser.socket_id);
+    
+    await supabase
+      .from('queues')
+      .delete()
+      .eq('socket_id', secondOtherUser.socket_id);
+    
+    // Notify both users
+    io.to(firstOtherUser.socket_id).emit('matched', { partnerGender: 'other' });
+    io.to(secondOtherUser.socket_id).emit('matched', { partnerGender: 'other' });
+    
+    console.log(`Matched ${firstOtherUser.socket_id} with ${secondOtherUser.socket_id}`);
   }
 }
 
 // Function to handle user disconnection
 async function disconnectUser(socketId) {
-  const userKey = `user:${socketId}`;
-  const gender = await redisClient.hget(userKey, 'gender');
-  const partnerId = await redisClient.hget(userKey, 'partner');
+  // Get user data
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('partner_id')
+    .eq('socket_id', socketId)
+    .single();
   
   // If user was in a call, notify their partner
-  if (partnerId && partnerId !== 'null') {
+  if (!userError && user && user.partner_id) {
     // Set partner's partner to null
-    await redisClient.hset(`user:${partnerId}`, 'partner', 'null');
+    await supabase
+      .from('users')
+      .update({ partner_id: null })
+      .eq('socket_id', user.partner_id);
+    
     // Notify partner that connection was lost
-    io.to(partnerId).emit('partner-disconnected');
+    io.to(user.partner_id).emit('partner-disconnected');
   }
   
-  // Remove user from queues if they were waiting
-  // Note: In a production environment, you would implement a more robust
-  // queue removal mechanism, as removing from the middle of a Redis list
-  // is not straightforward. For simplicity, we'll just remove from queues
-  // when matching (which we already do).
+  // Remove user from queues and users table
+  await supabase
+    .from('queues')
+    .delete()
+    .eq('socket_id', socketId);
   
-  // Remove user data
-  await redisClient.del(userKey);
+  await supabase
+    .from('users')
+    .delete()
+    .eq('socket_id', socketId);
 }
 
 // Start server when run directly
