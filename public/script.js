@@ -37,6 +37,8 @@ const configuration = {
 function initSocket() {
     // For Vercel deployment, connect to the same host
     const backendUrl = window.location.origin;
+    console.log('Connecting to Socket.IO at:', backendUrl);
+    
     socket = io(backendUrl, {
         transports: ['websocket', 'polling'],
         withCredentials: false,
@@ -44,15 +46,19 @@ function initSocket() {
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         timeout: 10000,
-        path: '/socket.io'
+        path: '/socket.io/',
+        upgrade: true,
+        rememberUpgrade: true
     });
     
     socket.on('connect', () => {
-        console.log('Connected to server');
+        console.log('Connected to server with ID:', socket.id);
     });
     
     socket.on('connect_error', (error) => {
         console.log('Connection error:', error);
+        console.log('Error type:', error.type);
+        console.log('Error message:', error.message);
         // Show user-friendly error message
         if (waitingPage.classList.contains('active')) {
             waitingMessage.textContent = 'Connection error. Please refresh the page.';
@@ -113,6 +119,13 @@ function initSocket() {
         endCall();
         showWaitingPage();
     });
+    
+    socket.on('error', (data) => {
+        console.log('Server error:', data);
+        if (data.message) {
+            alert('Server error: ' + data.message);
+        }
+    });
 }
 
 // Gender Selection
@@ -133,9 +146,21 @@ otherBtn.addEventListener('click', () => {
 
 // Join Queue
 function joinQueue() {
-    initSocket();
-    socket.emit('join', { gender: userGender });
-    showWaitingPage();
+    if (!socket || !socket.connected) {
+        initSocket();
+    }
+    
+    // Wait a bit for connection to establish
+    setTimeout(() => {
+        if (socket && socket.connected) {
+            console.log('Sending join request with gender:', userGender);
+            socket.emit('join', { gender: userGender });
+            showWaitingPage();
+        } else {
+            console.log('Socket not connected, cannot join queue');
+            waitingMessage.textContent = 'Connection failed. Please refresh the page.';
+        }
+    }, 1000);
 }
 
 // Show Waiting Page
@@ -167,7 +192,9 @@ function showWaitingPage() {
 
 // Cancel Waiting
 cancelBtn.addEventListener('click', () => {
-    socket.disconnect();
+    if (socket) {
+        socket.disconnect();
+    }
     
     // Clear waiting message interval
     if (waitingPage.messageInterval) {
@@ -275,7 +302,9 @@ function endCall() {
 
 // Disconnect Button
 disconnectBtn.addEventListener('click', () => {
-    socket.emit('disconnect-call');
+    if (socket) {
+        socket.emit('disconnect-call');
+    }
     endCall();
     showWaitingPage();
 });
@@ -290,7 +319,7 @@ messageInput.addEventListener('keypress', (e) => {
 
 function sendMessage() {
     const message = messageInput.value.trim();
-    if (message) {
+    if (message && socket) {
         socket.emit('chat-message', { message });
         addMessageToChat(message, 'sent');
         messageInput.value = '';
