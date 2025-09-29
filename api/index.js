@@ -10,7 +10,12 @@ const app = express();
 const server = http.createServer(app);
 
 // Initialize Socket.IO
-const io = initSocket(server);
+let io;
+initSocket(server).then(initializedIo => {
+  io = initializedIo;
+}).catch(err => {
+  console.error('Failed to initialize Socket.IO:', err);
+});
 
 // Middleware
 app.use(express.json());

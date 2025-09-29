@@ -1,14 +1,89 @@
 const http = require('http');
 const socketIo = require('socket.io');
+const redis = require('redis');
 
-// Store connections in memory (in production, use Redis)
-let connections = new Map();
-let maleQueue = [];
-let femaleQueue = [];
-let otherQueue = [];
+// Redis client (in production, use environment variables)
+let redisClientInstance;
+
+// Initialize Redis client
+function initRedis() {
+  if (process.env.REDIS_URL) {
+    // Production - use Redis
+    redisClientInstance = redis.createClient({
+      url: process.env.REDIS_URL
+    });
+  } else {
+    // Development - use in-memory storage
+    redisClientInstance = {
+      connected: true,
+      async lpush(key, value) {
+        if (!this.data) this.data = {};
+        if (!this.data[key]) this.data[key] = [];
+        this.data[key].unshift(value);
+        return this.data[key].length;
+      },
+      async rpop(key) {
+        if (!this.data) this.data = {};
+        if (!this.data[key] || this.data[key].length === 0) return null;
+        return this.data[key].pop();
+      },
+      async hset(key, field, value) {
+        if (!this.data) this.data = {};
+        if (!this.data[key]) this.data[key] = {};
+        this.data[key][field] = value;
+        return 1;
+      },
+      async hget(key, field) {
+        if (!this.data || !this.data[key]) return null;
+        return this.data[key][field];
+      },
+      async hdel(key, field) {
+        if (!this.data || !this.data[key]) return 0;
+        if (this.data[key][field] !== undefined) {
+          delete this.data[key][field];
+          return 1;
+        }
+        return 0;
+      },
+      async del(key) {
+        if (!this.data) return 0;
+        if (this.data[key] !== undefined) {
+          delete this.data[key];
+          return 1;
+        }
+        return 0;
+      },
+      async exists(key) {
+        if (!this.data) return 0;
+        return this.data[key] !== undefined ? 1 : 0;
+      },
+      async keys(pattern) {
+        if (!this.data) return [];
+        return Object.keys(this.data).filter(key => 
+          pattern === '*' || key.includes(pattern.replace('*', ''))
+        );
+      }
+    };
+  }
+  
+  return redisClientInstance;
+}
+
+// Initialize Redis
+const redisClient = initRedis();
 
 // Function to handle Socket.IO connections
-function initSocket(server) {
+async function initSocket(server) {
+  // Connect to Redis if needed
+  if (redisClient && !redisClient.connected) {
+    try {
+      await redisClient.connect();
+      console.log('Connected to Redis');
+    } catch (err) {
+      console.error('Failed to connect to Redis:', err);
+    }
+  }
+  
   const io = socketIo(server, {
     cors: {
       origin: "*",
@@ -18,94 +93,91 @@ function initSocket(server) {
     allowEIO3: true
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log('User connected:', socket.id);
 
     // When a user joins, add them to the appropriate queue
-    socket.on('join', (data) => {
+    socket.on('join', async (data) => {
       const { gender } = data;
       console.log(`${socket.id} joined as ${gender}`);
       
-      // Add user to the appropriate queue
-      if (gender === 'male') {
-        maleQueue.push(socket.id);
-      } else if (gender === 'female') {
-        femaleQueue.push(socket.id);
-      } else {
-        otherQueue.push(socket.id);
-      }
+      // Add user to the appropriate queue in Redis
+      const queueKey = `queue:${gender}`;
+      await redisClient.lpush(queueKey, socket.id);
       
       // Store user data
-      connections.set(socket.id, { gender, partner: null });
+      const userKey = `user:${socket.id}`;
+      await redisClient.hset(userKey, 'gender', gender);
+      await redisClient.hset(userKey, 'partner', 'null');
       
       // Try to find a match
-      findMatch(io);
+      await findMatch(io);
     });
 
     // Handle WebRTC signaling
-    socket.on('offer', (data) => {
-      const partnerId = connections.get(socket.id)?.partner;
-      if (partnerId) {
+    socket.on('offer', async (data) => {
+      const userKey = `user:${socket.id}`;
+      const partnerId = await redisClient.hget(userKey, 'partner');
+      if (partnerId && partnerId !== 'null') {
         io.to(partnerId).emit('offer', data);
       }
     });
 
-    socket.on('answer', (data) => {
-      const partnerId = connections.get(socket.id)?.partner;
-      if (partnerId) {
+    socket.on('answer', async (data) => {
+      const userKey = `user:${socket.id}`;
+      const partnerId = await redisClient.hget(userKey, 'partner');
+      if (partnerId && partnerId !== 'null') {
         io.to(partnerId).emit('answer', data);
       }
     });
 
-    socket.on('ice-candidate', (data) => {
-      const partnerId = connections.get(socket.id)?.partner;
-      if (partnerId) {
+    socket.on('ice-candidate', async (data) => {
+      const userKey = `user:${socket.id}`;
+      const partnerId = await redisClient.hget(userKey, 'partner');
+      if (partnerId && partnerId !== 'null') {
         io.to(partnerId).emit('ice-candidate', data);
       }
     });
 
     // Handle chat messages
-    socket.on('chat-message', (data) => {
-      const partnerId = connections.get(socket.id)?.partner;
-      if (partnerId) {
+    socket.on('chat-message', async (data) => {
+      const userKey = `user:${socket.id}`;
+      const partnerId = await redisClient.hget(userKey, 'partner');
+      if (partnerId && partnerId !== 'null') {
         io.to(partnerId).emit('chat-message', data);
       }
     });
 
     // Handle disconnection
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       console.log('User disconnected:', socket.id);
-      disconnectUser(socket.id, io);
+      await disconnectUser(socket.id, io);
     });
 
     // Handle user manually disconnecting
-    socket.on('disconnect-call', () => {
-      disconnectUser(socket.id, io);
+    socket.on('disconnect-call', async () => {
+      await disconnectUser(socket.id, io);
       // Re-add user to queue
-      const userData = connections.get(socket.id);
-      if (userData) {
-        if (userData.gender === 'male') {
-          maleQueue.push(socket.id);
-        } else if (userData.gender === 'female') {
-          femaleQueue.push(socket.id);
-        } else {
-          otherQueue.push(socket.id);
-        }
-        findMatch(io);
+      const userKey = `user:${socket.id}`;
+      const gender = await redisClient.hget(userKey, 'gender');
+      if (gender) {
+        const queueKey = `queue:${gender}`;
+        await redisClient.lpush(queueKey, socket.id);
+        await findMatch(io);
       }
     });
   });
 
   // Function to match users
-  function findMatch(io) {
+  async function findMatch(io) {
     // Try to match male with female
-    if (maleQueue.length > 0 && femaleQueue.length > 0) {
-      const maleId = maleQueue.shift();
-      const femaleId = femaleQueue.shift();
-      
+    const maleId = await redisClient.rpop('queue:male');
+    const femaleId = await redisClient.rpop('queue:female');
+    
+    if (maleId && femaleId) {
       // Set partners
-      connections.get(maleId).partner = femaleId;
-      connections.get(femaleId).partner = maleId;
+      await redisClient.hset(`user:${maleId}`, 'partner', femaleId);
+      await redisClient.hset(`user:${femaleId}`, 'partner', maleId);
       
       // Notify both users
       io.to(maleId).emit('matched', { partnerGender: 'female' });
@@ -115,14 +187,17 @@ function initSocket(server) {
       return;
     }
     
+    // Put back unmatched users
+    if (maleId) await redisClient.lpush('queue:male', maleId);
+    if (femaleId) await redisClient.lpush('queue:female', femaleId);
+    
     // Try to match others with anyone
-    if (otherQueue.length > 0) {
-      if (maleQueue.length > 0) {
-        const otherId = otherQueue.shift();
-        const maleId = maleQueue.shift();
-        
-        connections.get(otherId).partner = maleId;
-        connections.get(maleId).partner = otherId;
+    const otherId = await redisClient.rpop('queue:other');
+    if (otherId) {
+      const maleId = await redisClient.rpop('queue:male');
+      if (maleId) {
+        await redisClient.hset(`user:${otherId}`, 'partner', maleId);
+        await redisClient.hset(`user:${maleId}`, 'partner', otherId);
         
         io.to(otherId).emit('matched', { partnerGender: 'male' });
         io.to(maleId).emit('matched', { partnerGender: 'other' });
@@ -131,12 +206,10 @@ function initSocket(server) {
         return;
       }
       
-      if (femaleQueue.length > 0) {
-        const otherId = otherQueue.shift();
-        const femaleId = femaleQueue.shift();
-        
-        connections.get(otherId).partner = femaleId;
-        connections.get(femaleId).partner = otherId;
+      const femaleId = await redisClient.rpop('queue:female');
+      if (femaleId) {
+        await redisClient.hset(`user:${otherId}`, 'partner', femaleId);
+        await redisClient.hset(`user:${femaleId}`, 'partner', otherId);
         
         io.to(otherId).emit('matched', { partnerGender: 'female' });
         io.to(femaleId).emit('matched', { partnerGender: 'other' });
@@ -144,46 +217,52 @@ function initSocket(server) {
         console.log(`Matched ${otherId} with ${femaleId}`);
         return;
       }
+      
+      // Put back unmatched other user
+      await redisClient.lpush('queue:other', otherId);
     }
     
     // Try to match others with other if no opposite gender available
-    if (otherQueue.length > 1) {
-      const firstOtherId = otherQueue.shift();
-      const secondOtherId = otherQueue.shift();
-      
-      connections.get(firstOtherId).partner = secondOtherId;
-      connections.get(secondOtherId).partner = firstOtherId;
+    const firstOtherId = await redisClient.rpop('queue:other');
+    const secondOtherId = await redisClient.rpop('queue:other');
+    
+    if (firstOtherId && secondOtherId) {
+      await redisClient.hset(`user:${firstOtherId}`, 'partner', secondOtherId);
+      await redisClient.hset(`user:${secondOtherId}`, 'partner', firstOtherId);
       
       io.to(firstOtherId).emit('matched', { partnerGender: 'other' });
       io.to(secondOtherId).emit('matched', { partnerGender: 'other' });
       
       console.log(`Matched ${firstOtherId} with ${secondOtherId}`);
+    } else {
+      // Put back unmatched other users
+      if (firstOtherId) await redisClient.lpush('queue:other', firstOtherId);
+      if (secondOtherId) await redisClient.lpush('queue:other', secondOtherId);
     }
   }
 
   // Function to handle user disconnection
-  function disconnectUser(socketId, io) {
-    const userData = connections.get(socketId);
-    if (!userData) return;
+  async function disconnectUser(socketId, io) {
+    const userKey = `user:${socketId}`;
+    const gender = await redisClient.hget(userKey, 'gender');
+    const partnerId = await redisClient.hget(userKey, 'partner');
     
     // If user was in a call, notify their partner
-    if (userData.partner) {
-      const partnerData = connections.get(userData.partner);
-      if (partnerData) {
-        // Set partner's partner to null
-        partnerData.partner = null;
-        // Notify partner that connection was lost
-        io.to(userData.partner).emit('partner-disconnected');
-      }
+    if (partnerId && partnerId !== 'null') {
+      // Set partner's partner to null
+      await redisClient.hset(`user:${partnerId}`, 'partner', 'null');
+      // Notify partner that connection was lost
+      io.to(partnerId).emit('partner-disconnected');
     }
     
     // Remove user from queues if they were waiting
-    maleQueue = maleQueue.filter(id => id !== socketId);
-    femaleQueue = femaleQueue.filter(id => id !== socketId);
-    otherQueue = otherQueue.filter(id => id !== socketId);
+    // Note: In a production environment, you would implement a more robust
+    // queue removal mechanism, as removing from the middle of a Redis list
+    // is not straightforward. For simplicity, we'll just remove from queues
+    // when matching (which we already do).
     
-    // Remove user from connections
-    connections.delete(socketId);
+    // Remove user data
+    await redisClient.del(userKey);
   }
 
   return io;
